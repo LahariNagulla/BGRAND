@@ -1909,3 +1909,80 @@ body {
   }
 }
 
+/* =========================================================
+   FINAL EXPLORE STAY — CONTENT FIT / CENTERED
+   ========================================================= */
+
+.hero button.explore-stay {
+  position: absolute !important;
+  left: 50% !important;
+  bottom: 28px !important;
+  transform: translateX(-50%) !important;
+
+  width: max-content !important;
+  min-width: 0 !important;
+  max-width: none !important;
+
+  height: 62px !important;
+  min-height: 62px !important;
+  max-height: 62px !important;
+
+  margin: 0 !important;
+  padding: 7px 12px !important;
+
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 3px !important;
+
+  font-size: 9px !important;
+  line-height: 1 !important;
+  letter-spacing: 2px !important;
+}
+
+.hero button.explore-stay .arrow {
+  font-size: 15px !important;
+  line-height: 1 !important;
+}
+
+@media (max-width: 800px) {
+  .hero button.explore-stay {
+    left: 50% !important;
+    bottom: 14px !important;
+
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+
+    height: 50px !important;
+    min-height: 50px !important;
+    max-height: 50px !important;
+
+    padding: 5px 9px !important;
+    gap: 2px !important;
+
+    font-size: 7px !important;
+    line-height: 1 !important;
+    letter-spacing: 1.4px !important;
+  }
+
+  .hero button.explore-stay .arrow {
+    font-size: 15px !important;
+  }
+}
+
+@media (max-width: 500px) {
+  .hero button.explore-stay {
+    width: max-content !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 48px !important;
+    padding: 5px 8px !important;
+    font-size: 7px !important;
+    letter-spacing: 1.2px !important;
+  }
+}
