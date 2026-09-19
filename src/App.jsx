@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { supabase } from "./lib/supabase";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import "./App.css";
 import Admin from "./admin/Admin";
@@ -8,6 +9,7 @@ import AdminBookings from "./admin/AdminBookings";
 import AdminGallery from "./admin/AdminGallery";
 import AdminGuests from "./admin/AdminGuests";
 import AdminSettings from "./admin/AdminSettings";
+
 function App() {
   if (window.location.pathname === "/admin") {
     return <Admin />;
@@ -49,56 +51,200 @@ function App() {
     "Contact",
   ];
 
-  const rooms = [
-    {
-      name: "Luxury Deluxe Room",
-      images: [
-        "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=85",
-        "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1200&q=85",
-        "https://images.unsplash.com/photo-1595576508898-0ad5c879a061?auto=format&fit=crop&w=1200&q=85",
-      ],
-      description:
-        "A beautifully designed room offering a comfortable and relaxing stay.",
-      price: "₹2,999",
-      features: [
-        "King Bed",
-        "Free Wi-Fi",
-        "Air Conditioning",
-      ],
-    },
-    {
-      name: "Premium Suite",
-      images: [
-        "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1200&q=85",
-        "https://images.unsplash.com/photo-1591088398332-8a7791972843?auto=format&fit=crop&w=1200&q=85",
-        "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?auto=format&fit=crop&w=1200&q=85",
-      ],
-      description:
-        "A spacious premium suite designed for guests looking for extra comfort.",
-      price: "₹4,499",
-      features: [
-        "King Bed",
-        "Private Lounge",
-        "Free Wi-Fi",
-      ],
-    },
-    {
-      name: "Executive Room",
-      images: [
-        "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1200&q=85",
-        "https://images.unsplash.com/photo-1598928506311-c55ded91a20c?auto=format&fit=crop&w=1200&q=85",
-        "https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?auto=format&fit=crop&w=1200&q=85",
-      ],
-      description:
-        "An elegant stay experience combining modern interiors with everyday comfort.",
-      price: "₹3,499",
-      features: [
-        "Queen Bed",
-        "Smart TV",
-        "Air Conditioning",
-      ],
-    },
-  ];
+  const [rooms, setRooms] = useState([]);
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [siteSettings, setSiteSettings] = useState(null);
+
+  useEffect(() => {
+    const fetchRooms = async () => {
+      const { data, error } = await supabase
+        .from("rooms")
+        .select("*")
+        .order("id", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching rooms:", error);
+        return;
+      }
+
+      const formattedRooms = (data || []).map((room) => ({
+        ...room,
+        images: [
+          ...(room.image ? [room.image] : []),
+          ...(Array.isArray(room.extra_images) ? room.extra_images : [])
+        ].length
+          ? [
+              ...(room.image ? [room.image] : []),
+              ...(Array.isArray(room.extra_images) ? room.extra_images : [])
+            ]
+          : ["/bgrand-gallery-1.jpg"],
+        features: Array.isArray(room.features) ? room.features : []
+      }));
+
+      setRooms(formattedRooms);
+    };
+
+    fetchRooms();
+
+    const channel = supabase
+      .channel("client-rooms-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "rooms",
+        },
+        (payload) => {
+          const buildRoom = (room) => {
+            return {
+              ...room,
+              images: [
+                ...(room.image ? [room.image] : []),
+                ...(Array.isArray(room.extra_images) ? room.extra_images : [])
+              ].length
+                ? [
+                    ...(room.image ? [room.image] : []),
+                    ...(Array.isArray(room.extra_images) ? room.extra_images : [])
+                  ]
+                : ["/bgrand-gallery-1.jpg"],
+              features: Array.isArray(room.features) ? room.features : []
+            };
+          };
+
+          if (payload.eventType === "INSERT") {
+            setRooms((current) => {
+              if (current.some((item) => item.id === payload.new.id)) {
+                return current;
+              }
+              return [...current, buildRoom(payload.new)];
+            });
+          }
+
+          if (payload.eventType === "UPDATE") {
+            setRooms((current) =>
+              current.map((item) =>
+                item.id === payload.new.id ? buildRoom(payload.new) : item
+              )
+            );
+          }
+
+          if (payload.eventType === "DELETE") {
+            setRooms((current) =>
+              current.filter((item) => item.id !== payload.old.id)
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log("Client Rooms Realtime Status:", status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const fetchGallery = async () => {
+      const { data, error } = await supabase
+        .from("gallery")
+        .select("*")
+        .order("id", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching gallery:", error);
+        return;
+      }
+
+      setGalleryImages(data || []);
+    };
+
+    fetchGallery();
+
+    const channel = supabase
+      .channel("client-gallery-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "gallery",
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setGalleryImages((current) => {
+              const exists = current.some(
+                (item) => item.id === payload.new.id
+              );
+              if (exists) return current;
+              return [...current, payload.new];
+            });
+          }
+
+          if (payload.eventType === "UPDATE") {
+            setGalleryImages((current) =>
+              current.map((item) =>
+                item.id === payload.new.id ? payload.new : item
+              )
+            );
+          }
+
+          if (payload.eventType === "DELETE") {
+            setGalleryImages((current) =>
+              current.filter((item) => item.id !== payload.old.id)
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log("Client Gallery Realtime Status:", status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      const { data, error } = await supabase
+        .from("settings")
+        .select("*")
+        .eq("id", 1)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching settings:", error);
+        return;
+      }
+
+      setSiteSettings(data || null);
+    };
+
+    fetchSettings();
+
+    const channel = supabase
+      .channel("client-settings-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "settings",
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
+            setSiteSettings(payload.new);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const closeMenu = () => {
     setMenuOpen(false);
@@ -146,7 +292,7 @@ function App() {
     );
   };
 
-  const handleBookingSubmit = (e) => {
+  const handleBookingSubmit = async (e) => {
     e.preventDefault();
 
     const formData = new FormData(e.target);
@@ -158,29 +304,34 @@ function App() {
     const checkOut = formData.get("checkOut");
     const guests = formData.get("guests");
 
+    const bookingId = `BG${Date.now()}`;
+
     const booking = {
-      id: `BG${Date.now()}`,
-      name,
+      booking_id: bookingId,
+      guest: name,
       phone,
       room,
-      checkIn,
-      checkOut,
-      guests,
+      check_in: checkIn,
+      check_out: checkOut,
+      guests: Number(guests),
       status: "Pending",
     };
 
-    const existingBookings =
-      JSON.parse(localStorage.getItem("bgrandBookings")) || [];
+    const { error } = await supabase
+      .from("bookings")
+      .insert(booking);
 
-    localStorage.setItem(
-      "bgrandBookings",
-      JSON.stringify([...existingBookings, booking])
-    );
+    if (error) {
+      console.error("Booking error:", error);
+      alert("Booking failed. Please try again.");
+      return;
+    }
 
     const message = `Hello BGRAND,
 
 I would like to make a booking.
 
+Booking ID: ${bookingId}
 Room: ${room || "Not selected"}
 Name: ${name}
 Phone: ${phone}
@@ -188,11 +339,13 @@ Check-in: ${checkIn}
 Check-out: ${checkOut}
 Guests: ${guests}`;
 
-    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(
-      message
-    )}`;
+    const whatsappNumber = siteSettings?.whatsapp_number || siteSettings?.contact_number || "";
+    const whatsappDigits = String(whatsappNumber).replace(/[^0-9]/g, "");
+    const whatsappUrl = `https://wa.me/${whatsappDigits}?text=${encodeURIComponent(message)}`;
 
     window.open(whatsappUrl, "_blank");
+
+    alert("Booking request submitted successfully!");
 
     e.target.reset();
     setBookingRoom("");
@@ -363,7 +516,7 @@ Guests: ${guests}`;
       <section id="home" className="hero">
         <motion.img
           src="/bgrand-hero.jpg"
-          alt="BGRAND Homestay"
+          alt={siteSettings?.property_name || siteSettings?.propertyName || "BGRAND Homestay"}
           className="hero-image"
           initial={{
             opacity: 0,
@@ -545,7 +698,7 @@ Guests: ${guests}`;
 
                   <div className="room-price">
                     <span>From</span>
-                    <strong>{room.price}</strong>
+                    <strong>{siteSettings?.currency || "₹"}{Number(room.price).toLocaleString("en-IN")}</strong>
                     <small>/ night</small>
                   </div>
                 </div>
@@ -636,151 +789,43 @@ Guests: ${guests}`;
         </motion.div>
 
         <div className="gallery-grid">
+          {galleryImages.map((item, index) => (
+            <motion.div
+              key={item.id}
+              className={`gallery-item ${
+                index === 0
+                  ? "gallery-large"
+                  : index === galleryImages.length - 1
+                  ? "gallery-wide"
+                  : ""
+              }`}
+              initial={{
+                opacity: 0,
+                y: 50,
+              }}
+              whileInView={{
+                opacity: 1,
+                y: 0,
+              }}
+              viewport={{
+                once: true,
+              }}
+              transition={{
+                duration: 0.7,
+                delay: index * 0.1,
+              }}
+            >
+              <img
+                src={item.image}
+                alt={item.title}
+              />
 
-          <motion.div
-            className="gallery-item gallery-large"
-            initial={{
-              opacity: 0,
-              y: 50,
-            }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            viewport={{
-              once: true,
-            }}
-            transition={{
-              duration: 0.7,
-            }}
-          >
-            <img
-              src="/bgrand-gallery-1.jpg"
-              alt="BGRAND room"
-            />
-
-            <div className="gallery-overlay">
-              <span>ROOMS</span>
-              <strong>Comfortable Stay</strong>
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="gallery-item"
-            initial={{
-              opacity: 0,
-              y: 50,
-            }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            viewport={{
-              once: true,
-            }}
-            transition={{
-              duration: 0.7,
-              delay: 0.1,
-            }}
-          >
-            <img
-              src="/bgrand-gallery-2.jpg"
-              alt="BGRAND room interior"
-            />
-
-            <div className="gallery-overlay">
-              <span>INTERIOR</span>
-              <strong>Relax & Unwind</strong>
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="gallery-item"
-            initial={{
-              opacity: 0,
-              y: 50,
-            }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            viewport={{
-              once: true,
-            }}
-            transition={{
-              duration: 0.7,
-              delay: 0.2,
-            }}
-          >
-            <img
-              src="/bgrand-gallery-3.jpg"
-              alt="BGRAND bedroom"
-            />
-
-            <div className="gallery-overlay">
-              <span>BEDROOM</span>
-              <strong>Peaceful Nights</strong>
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="gallery-item"
-            initial={{
-              opacity: 0,
-              y: 50,
-            }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            viewport={{
-              once: true,
-            }}
-            transition={{
-              duration: 0.7,
-              delay: 0.3,
-            }}
-          >
-            <img
-              src="/bgrand-gallery-4.jpg"
-              alt="BGRAND living area"
-            />
-
-            <div className="gallery-overlay">
-              <span>LIVING SPACE</span>
-              <strong>Feel at Home</strong>
-            </div>
-          </motion.div>
-
-          <motion.div
-            className="gallery-item gallery-wide"
-            initial={{
-              opacity: 0,
-              y: 50,
-            }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-            }}
-            viewport={{
-              once: true,
-            }}
-            transition={{
-              duration: 0.7,
-              delay: 0.4,
-            }}
-          >
-            <img
-              src="/bgrand-gallery-5.jpg"
-              alt="BGRAND accommodation"
-            />
-
-            <div className="gallery-overlay">
-              <span>BGRAND</span>
-              <strong>Your Comfortable Escape</strong>
-            </div>
-          </motion.div>
-
+              <div className="gallery-overlay">
+                <span>BGRAND</span>
+                <strong>{item.title}</strong>
+              </div>
+            </motion.div>
+          ))}
         </div>
       </section>
 
@@ -833,7 +878,7 @@ Guests: ${guests}`;
           }}
         >
           <p className="about-label">
-            ABOUT BGRAND
+            ABOUT {siteSettings?.property_name || siteSettings?.propertyName || "BGRAND"}
           </p>
 
           <h2>
@@ -902,7 +947,11 @@ Guests: ${guests}`;
               <h3>Visit Us</h3>
 
               <p className="map-text">
-                Find BGRAND easily and get directions to your stay.
+                {siteSettings?.property_address || "BGRAND"}
+              </p>
+
+              <p className="map-text">
+                {siteSettings?.property_address || "Find BGRAND easily and get directions to your stay."}
               </p>
 
               <a
@@ -937,6 +986,8 @@ Guests: ${guests}`;
         <p>PLAN YOUR STAY</p>
 
         <h2>Book Your Stay</h2>
+
+        <p>Check-in: {siteSettings?.check_in_time || "2:00 PM"} | Check-out: {siteSettings?.check_out_time || "11:00 AM"}</p>
 
         <form
           className="booking-form"
@@ -991,14 +1042,15 @@ Guests: ${guests}`;
           />
 
           <select name="guests" required>
-            <option value="">
-              Number of Guests
-            </option>
-            <option value="1">1 Guest</option>
-            <option value="2">2 Guests</option>
-            <option value="3">3 Guests</option>
-            <option value="4">4 Guests</option>
-            <option value="5+">5+ Guests</option>
+            <option value="">Number of Guests</option>
+            {Array.from(
+              { length: Number(siteSettings?.maximum_guests) || 5 },
+              (_, index) => index + 1
+            ).map((count) => (
+              <option key={count} value={count}>
+                {count} {count === 1 ? "Guest" : "Guests"}
+              </option>
+            ))}
           </select>
 
           <button type="submit">
@@ -1025,13 +1077,13 @@ Guests: ${guests}`;
           </p>
 
           <h2>
-            Thank You for Choosing <span>BGRAND</span>
+            Thank You for Choosing <span>{siteSettings?.property_name || siteSettings?.propertyName || "BGRAND"}</span>
           </h2>
 
           <div className="stay-line"></div>
 
           <p className="stay-message">
-            Thank you for choosing BGRAND. We look forward to welcoming you
+            Thank you for choosing {siteSettings?.property_name || siteSettings?.propertyName || "BGRAND"}. We look forward to welcoming you
             and making your stay comfortable and memorable.
           </p>
         </motion.div>
@@ -1053,13 +1105,13 @@ Guests: ${guests}`;
 
             <p className="stay-card-text">
               Have a question, want to make a booking, or simply want to
-              stay updated with BGRAND? Connect with us.
+              stay updated with {siteSettings?.property_name || siteSettings?.propertyName || "BGRAND"}? Connect with us.
             </p>
 
             <div className="stay-links">
 
               <a
-                href="https://wa.me/"
+                href={siteSettings?.whatsapp_number ? `https://wa.me/${String(siteSettings.whatsapp_number).replace(/[^0-9]/g, "")}` : siteSettings?.contact_number ? `https://wa.me/${String(siteSettings.contact_number).replace(/[^0-9]/g, "")}` : "#"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="stay-link-card"
@@ -1073,7 +1125,7 @@ Guests: ${guests}`;
               </a>
 
               <a
-                href="#"
+                href={siteSettings?.instagram_url || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="stay-link-card"
@@ -1081,19 +1133,31 @@ Guests: ${guests}`;
                 <span className="stay-icon">◎</span>
                 <div>
                   <strong>Instagram</strong>
-                  <small>Follow BGRAND</small>
+                  <small>{siteSettings?.instagram_url ? "Follow BGRAND" : "Instagram link not set"}</small>
                 </div>
                 <span className="stay-arrow">→</span>
               </a>
 
               <a
-                href="tel:+910000000000"
+                href={siteSettings?.contact_number ? `tel:${siteSettings.contact_number}` : "#"}
                 className="stay-link-card"
               >
                 <span className="stay-icon">☎</span>
                 <div>
                   <strong>Call Us</strong>
-                  <small>Contact BGRAND</small>
+                  <small>{siteSettings?.contact_number || "Contact BGRAND"}</small>
+                </div>
+                <span className="stay-arrow">→</span>
+              </a>
+
+              <a
+                href={siteSettings?.property_email ? `mailto:${siteSettings.property_email}` : "#"}
+                className="stay-link-card"
+              >
+                <span className="stay-icon">@</span>
+                <div>
+                  <strong>Email</strong>
+                  <small>{siteSettings?.property_email || "Email BGRAND"}</small>
                 </div>
                 <span className="stay-arrow">→</span>
               </a>
@@ -1237,7 +1301,7 @@ Guests: ${guests}`;
 
                   <div>
                     <strong>
-                      {selectedRoom.price}
+                      {siteSettings?.currency || "₹"}{Number(selectedRoom.price).toLocaleString("en-IN")}
                     </strong>
 
                     <span>/ night</span>

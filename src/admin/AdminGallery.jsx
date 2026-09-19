@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
 import { motion, AnimatePresence } from "motion/react";
 import "./AdminGallery.css";
 
@@ -8,28 +9,8 @@ function AdminGallery() {
   const [imageTitle, setImageTitle] = useState("");
   const [deleteIndex, setDeleteIndex] = useState(null);
 
-  const [galleryImages, setGalleryImages] = useState([
-    {
-      title: "Property View",
-      image: "/bgrand-gallery-1.jpg",
-    },
-    {
-      title: "Room Interior",
-      image: "/bgrand-gallery-2.jpg",
-    },
-    {
-      title: "Resort View",
-      image: "/bgrand-gallery-3.jpg",
-    },
-    {
-      title: "Bedroom",
-      image: "/bgrand-gallery-4.jpg",
-    },
-    {
-      title: "BGRAND Accommodation",
-      image: "/bgrand-gallery-5.jpg",
-    },
-  ]);
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
@@ -47,7 +28,73 @@ function AdminGallery() {
     });
   };
 
-  const handleAddImage = (e) => {
+  const fetchGallery = async () => {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("gallery")
+      .select("*")
+      .order("id", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching gallery:", error);
+      alert(error.message);
+      setGalleryImages([]);
+    } else {
+      setGalleryImages(data || []);
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchGallery();
+
+    const channel = supabase
+      .channel("gallery-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "gallery",
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setGalleryImages((current) => {
+              const exists = current.some(
+                (item) => item.id === payload.new.id
+              );
+              if (exists) return current;
+              return [...current, payload.new];
+            });
+          }
+
+          if (payload.eventType === "UPDATE") {
+            setGalleryImages((current) =>
+              current.map((item) =>
+                item.id === payload.new.id ? payload.new : item
+              )
+            );
+          }
+
+          if (payload.eventType === "DELETE") {
+            setGalleryImages((current) =>
+              current.filter((item) => item.id !== payload.old.id)
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log("Gallery Realtime Status:", status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const handleAddImage = async (e) => {
     e.preventDefault();
 
     if (!selectedImage) {
@@ -60,24 +107,61 @@ function AdminGallery() {
       return;
     }
 
-    const newImage = {
-      title: imageTitle.trim(),
-      image: selectedImage.preview,
-    };
+    const file = selectedImage.file;
+    const fileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, "-")}`;
+    const filePath = `gallery/${fileName}`;
 
-    setGalleryImages((prev) => [...prev, newImage]);
+    const { error: uploadError } = await supabase.storage
+      .from("gallery")
+      .upload(filePath, file);
+
+    if (uploadError) {
+      console.error("Image upload error:", uploadError);
+      alert(uploadError.message);
+      return;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from("gallery")
+      .getPublicUrl(filePath);
+
+    const imageUrl = publicUrlData.publicUrl;
+
+    const { error: insertError } = await supabase
+      .from("gallery")
+      .insert({
+        title: imageTitle.trim(),
+        image: imageUrl,
+      });
+
+    if (insertError) {
+      console.error("Gallery insert error:", insertError);
+      alert(insertError.message);
+      return;
+    }
 
     setImageTitle("");
     setSelectedImage(null);
     setShowAddModal(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deleteIndex === null) return;
 
-    setGalleryImages((prev) =>
-      prev.filter((_, index) => index !== deleteIndex)
-    );
+    const item = galleryImages[deleteIndex];
+
+    if (!item) return;
+
+    const { error } = await supabase
+      .from("gallery")
+      .delete()
+      .eq("id", item.id);
+
+    if (error) {
+      console.error("Gallery delete error:", error);
+      alert(error.message);
+      return;
+    }
 
     setDeleteIndex(null);
   };
@@ -284,11 +368,14 @@ function AdminGallery() {
 
           <section className="gallery-grid">
 
-            {galleryImages.map((item, index) => (
+            {loading ? (
+              <p>Loading gallery...</p>
+            ) : (
+              galleryImages.map((item, index) => (
 
-              <motion.div
+                <motion.div
                 className="gallery-card"
-                key={`${item.title}-${index}`}
+                key={item.id || `${item.title}-${index}`}
                 initial={{
                   opacity: 0,
                   scale: 0.85,
@@ -342,9 +429,10 @@ function AdminGallery() {
 
                 </div>
 
-              </motion.div>
+                </motion.div>
 
-            ))}
+              ))
+            )}
 
           </section>
 

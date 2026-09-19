@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../lib/supabase";
 import { motion, AnimatePresence } from "motion/react";
 import "./AdminGuests.css";
 
@@ -6,48 +7,117 @@ function AdminGuests() {
   const [search, setSearch] = useState("");
   const [selectedGuest, setSelectedGuest] = useState(null);
 
-  const [guests] = useState([
-    {
-      id: "G001",
-      name: "Rahul Kumar",
-      phone: "9876543210",
-      room: "Premium Suite",
-      checkIn: "20 Sep 2026",
-      checkOut: "22 Sep 2026",
-      guests: 2,
-      status: "Pending",
-    },
-    {
-      id: "G002",
-      name: "Priya Sharma",
-      phone: "9876543211",
-      room: "Luxury Deluxe Room",
-      checkIn: "21 Sep 2026",
-      checkOut: "23 Sep 2026",
-      guests: 2,
-      status: "Confirmed",
-    },
-    {
-      id: "G003",
-      name: "Arjun Reddy",
-      phone: "9876543212",
-      room: "Executive Room",
-      checkIn: "24 Sep 2026",
-      checkOut: "25 Sep 2026",
-      guests: 1,
-      status: "Confirmed",
-    },
-    {
-      id: "G004",
-      name: "Sneha Reddy",
-      phone: "9876543213",
-      room: "Premium Suite",
-      checkIn: "26 Sep 2026",
-      checkOut: "28 Sep 2026",
-      guests: 3,
-      status: "Pending",
-    },
-  ]);
+  const [guests, setGuests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchGuests = async () => {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching guests:", error);
+      alert(error.message);
+      setGuests([]);
+    } else {
+      const formattedGuests = (data || []).map((booking) => ({
+        id: booking.booking_id || `G${booking.id}`,
+        name: booking.guest || "Guest",
+        phone: booking.phone || "-",
+        room: booking.room || "-",
+        checkIn: booking.check_in || booking.checkIn || "-",
+        checkOut: booking.check_out || booking.checkOut || "-",
+        guests: booking.guests || 0,
+        status: booking.status || "Pending",
+        bookingId: booking.id,
+      }));
+
+      setGuests(formattedGuests);
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchGuests();
+
+    const channel = supabase
+      .channel("guests-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bookings",
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const booking = payload.new;
+
+            const guest = {
+              id: booking.booking_id || `G${booking.id}`,
+              name: booking.guest || "Guest",
+              phone: booking.phone || "-",
+              room: booking.room || "-",
+              checkIn: booking.check_in || booking.checkIn || "-",
+              checkOut: booking.check_out || booking.checkOut || "-",
+              guests: booking.guests || 0,
+              status: booking.status || "Pending",
+              bookingId: booking.id,
+            };
+
+            setGuests((current) => {
+              if (current.some((item) => item.bookingId === booking.id)) {
+                return current;
+              }
+              return [guest, ...current];
+            });
+          }
+
+          if (payload.eventType === "UPDATE") {
+            const booking = payload.new;
+
+            setGuests((current) =>
+              current.map((item) =>
+                item.bookingId === booking.id
+                  ? {
+                      ...item,
+                      id: booking.booking_id || `G${booking.id}`,
+                      name: booking.guest || "Guest",
+                      phone: booking.phone || "-",
+                      room: booking.room || "-",
+                      checkIn: booking.check_in || booking.checkIn || "-",
+                      checkOut: booking.check_out || booking.checkOut || "-",
+                      guests: booking.guests || 0,
+                      status: booking.status || "Pending",
+                    }
+                  : item
+              )
+            );
+          }
+
+          if (payload.eventType === "DELETE") {
+            setGuests((current) =>
+              current.filter((item) => item.bookingId !== payload.old.id)
+            );
+
+            setSelectedGuest((current) =>
+              current?.bookingId === payload.old.id ? null : current
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log("Guests Realtime Status:", status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const filteredGuests = guests.filter((guest) =>
     `${guest.name} ${guest.phone} ${guest.room}`
@@ -257,7 +327,14 @@ function AdminGuests() {
 
               <tbody>
 
-                {filteredGuests.map((guest, index) => (
+                {loading ? (
+                  <tr>
+                    <td colSpan="8" style={{ textAlign: "center", padding: "30px" }}>
+                      Loading guests...
+                    </td>
+                  </tr>
+                ) : (
+                  filteredGuests.map((guest, index) => (
 
                   <motion.tr
                     key={guest.id}
@@ -321,7 +398,8 @@ function AdminGuests() {
 
                   </motion.tr>
 
-                ))}
+                  ))
+                )}
 
               </tbody>
 
