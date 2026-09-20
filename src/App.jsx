@@ -1030,14 +1030,32 @@ Guests: ${guests}`;
           </select>
 
           <input
-            type="date"
+            type="text"
             name="checkIn"
+            placeholder="Check-in Date"
+            onFocus={(e) => {
+              e.currentTarget.type = "date";
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.value) {
+                e.currentTarget.type = "text";
+              }
+            }}
             required
           />
 
           <input
-            type="date"
+            type="text"
             name="checkOut"
+            placeholder="Check-out Date"
+            onFocus={(e) => {
+              e.currentTarget.type = "date";
+            }}
+            onBlur={(e) => {
+              if (!e.currentTarget.value) {
+                e.currentTarget.type = "text";
+              }
+            }}
             required
           />
 
