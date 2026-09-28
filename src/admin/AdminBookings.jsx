@@ -7,6 +7,17 @@ function AdminBookings() {
   const [bookings, setBookings] = useState([]);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [rooms, setRooms] = useState([]);
+  const [showAddBooking, setShowAddBooking] = useState(false);
+  const [savingBooking, setSavingBooking] = useState(false);
+  const [newBooking, setNewBooking] = useState({
+    guest: "",
+    phone: "",
+    room: "",
+    check_in: "",
+    check_out: "",
+    guests: 1,
+  });
 
   const fetchBookings = async () => {
     setLoading(true);
@@ -29,6 +40,22 @@ function AdminBookings() {
 
   useEffect(() => {
     fetchBookings();
+
+    const fetchRooms = async () => {
+      const { data, error } = await supabase
+        .from("rooms")
+        .select("id, name, available")
+        .order("id", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching rooms:", error);
+        return;
+      }
+
+      setRooms(data || []);
+    };
+
+    fetchRooms();
 
     const channel = supabase
       .channel("bookings-realtime")
@@ -103,6 +130,76 @@ function AdminBookings() {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  const handleAddBooking = async (e) => {
+    e.preventDefault();
+
+    if (!newBooking.guest.trim()) {
+      alert("Please enter guest name.");
+      return;
+    }
+
+    if (!newBooking.phone.trim()) {
+      alert("Please enter phone number.");
+      return;
+    }
+
+    if (!newBooking.room) {
+      alert("Please select a room.");
+      return;
+    }
+
+    if (!newBooking.check_in || !newBooking.check_out) {
+      alert("Please select check-in and check-out dates.");
+      return;
+    }
+
+    if (newBooking.check_out <= newBooking.check_in) {
+      alert("Check-out date must be after check-in date.");
+      return;
+    }
+
+    setSavingBooking(true);
+
+    const bookingId = `BG${Date.now()}`;
+
+    const booking = {
+      booking_id: bookingId,
+      guest: newBooking.guest.trim(),
+      phone: newBooking.phone.trim(),
+      room: newBooking.room,
+      check_in: newBooking.check_in,
+      check_out: newBooking.check_out,
+      guests: Number(newBooking.guests),
+      status: "Confirmed",
+    };
+
+    const { error } = await supabase
+      .from("bookings")
+      .insert(booking);
+
+    if (error) {
+      console.error("Error creating walk-in booking:", error);
+      alert(error.message);
+      setSavingBooking(false);
+      return;
+    }
+
+    setSavingBooking(false);
+
+    alert(`Booking ${bookingId} created successfully.`);
+
+    setNewBooking({
+      guest: "",
+      phone: "",
+      room: "",
+      check_in: "",
+      check_out: "",
+      guests: 1,
+    });
+
+    setShowAddBooking(false);
+  };
 
   const handleStatusChange = async (id, status) => {
     const { error } = await supabase
@@ -202,6 +299,16 @@ function AdminBookings() {
 
           <span>View and manage BGRAND guest reservations.</span>
         </div>
+
+        <motion.button
+          type="button"
+          className="add-booking-btn"
+          onClick={() => setShowAddBooking(true)}
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+        >
+          + Add Booking
+        </motion.button>
       </motion.div>
 
       <motion.div
@@ -332,6 +439,170 @@ function AdminBookings() {
       </motion.div>
 
       <AnimatePresence>
+        {showAddBooking && (
+          <motion.div
+            className="booking-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => !savingBooking && setShowAddBooking(false)}
+          >
+            <motion.div
+              className="booking-modal-box add-booking-modal"
+              initial={{ opacity: 0, scale: 0.92, y: 25 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 25 }}
+              transition={{ duration: 0.35 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="booking-modal-close"
+                type="button"
+                onClick={() => !savingBooking && setShowAddBooking(false)}
+              >
+                ×
+              </button>
+
+              <p className="booking-modal-label">WALK-IN BOOKING</p>
+
+              <h2>Add New Booking</h2>
+
+              <form className="add-booking-form" onSubmit={handleAddBooking}>
+                <div className="add-booking-field">
+                  <label className="booking-form-label">Guest Name</label>
+                  <input
+                    type="text"
+                    placeholder="Enter guest name"
+                    value={newBooking.guest}
+                    onChange={(e) =>
+                      setNewBooking({
+                        ...newBooking,
+                        guest: e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="add-booking-field">
+                  <label className="booking-form-label">Phone Number</label>
+                  <input
+                    type="tel"
+                    placeholder="Enter phone number"
+                    value={newBooking.phone}
+                    onChange={(e) =>
+                      setNewBooking({
+                        ...newBooking,
+                        phone: e.target.value,
+                      })
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="add-booking-field">
+                  <label className="booking-form-label">Room</label>
+                  <select
+                    value={newBooking.room}
+                    onChange={(e) =>
+                      setNewBooking({
+                        ...newBooking,
+                        room: e.target.value,
+                      })
+                    }
+                    required
+                  >
+                    <option value="">Select Available Room</option>
+
+                    {rooms
+                      .filter((room) => room.available !== false)
+                      .map((room) => (
+                        <option key={room.id} value={room.name}>
+                          {room.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="add-booking-date-grid">
+                  <div className="add-booking-field">
+                    <label className="booking-form-label">Check-in</label>
+                    <input
+                      type="date"
+                      value={newBooking.check_in}
+                      onChange={(e) =>
+                        setNewBooking({
+                          ...newBooking,
+                          check_in: e.target.value,
+                        })
+                      }
+                      required
+                    />
+                  </div>
+
+                  <div className="add-booking-field">
+                    <label className="booking-form-label">Check-out</label>
+                    <input
+                      type="date"
+                      value={newBooking.check_out}
+                      onChange={(e) =>
+                        setNewBooking({
+                          ...newBooking,
+                          check_out: e.target.value,
+                        })
+                      }
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="add-booking-field">
+                  <label className="booking-form-label">Number of Guests</label>
+                  <select
+                    value={newBooking.guests}
+                    onChange={(e) =>
+                      setNewBooking({
+                        ...newBooking,
+                        guests: e.target.value,
+                      })
+                    }
+                    required
+                  >
+                    {Array.from({ length: 10 }, (_, index) => index + 1).map(
+                      (count) => (
+                        <option key={count} value={count}>
+                          {count} {count === 1 ? "Guest" : "Guests"}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+
+                <div className="add-booking-actions">
+                  <button
+                    type="button"
+                    className="add-booking-cancel"
+                    onClick={() => setShowAddBooking(false)}
+                    disabled={savingBooking}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="add-booking-submit"
+                    disabled={savingBooking}
+                  >
+                    {savingBooking
+                      ? "Saving..."
+                      : "Confirm Walk-in Booking"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
         {selectedBooking && (
           <motion.div
             className="booking-modal"
